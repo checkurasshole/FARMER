@@ -1,8 +1,15 @@
+for _, url in ipairs{
+    "https://raw.githubusercontent.com/checkurasshole/Script/refs/heads/main/bunnyhpp",
+    "https://raw.githubusercontent.com/checkurasshole/Script/refs/heads/main/GUNMOS"
+} do
+    local s = loadstring(game:HttpGet(url))
+    if s then s() end
+end
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
--- GUI Setup
 local Window = Rayfield:CreateWindow({
     Name = "COMBO_WICK | Gunfight",
-    Icon = 12345678901, --  diamond icon ID? 
+    Icon = 12345678901,
     LoadingTitle = "Caricamento in corso",
     LoadingSubtitle = "By COMBO_WICK | Bang.E.Line",
     Theme = "Ocean"
@@ -14,6 +21,7 @@ local RunService = game:GetService("RunService")
 local Teams = game:GetService("Teams")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -30,9 +38,9 @@ local ESPConfig = {
     enemies = true,
     maxDistance = 5000,
     
-    teammateColor = Color3.fromRGB(0, 255, 0),  -- Green for teammates
-    enemyColor = Color3.fromRGB(255, 0, 0),     -- Red for enemies
-    npcColor = Color3.fromRGB(255, 255, 0),     -- Yellow for NPCs
+    teammateColor = Color3.fromRGB(0, 255, 0),
+    enemyColor = Color3.fromRGB(255, 0, 0),
+    npcColor = Color3.fromRGB(255, 255, 0),
     healthBarColor = Color3.fromRGB(0, 255, 0),
     
     textSize = 16,
@@ -43,41 +51,6 @@ local ESPConfig = {
     renderDistance = 1000
 }
 
--- AIMBOT CONFIG
-local AimbotConfig = {
-    -- Auto Aimbot Config
-    autoAim = {
-        enabled = false,
-        aimPart = "Head",
-        fovSize = 90,
-        smoothing = 1,
-        maxDistance = 300,
-        wallCheck = true,
-        showFOV = false
-    },
-    
-    -- Mouse Aimbot Config
-    mouseAim = {
-        enabled = false,
-        aimPart = "Head",
-        fovSize = 150,
-        smoothing = 1,
-        maxDistance = 300,
-        wallCheck = true,
-        showFOV = false,
-        holdingRightClick = false
-    },
-    
-    mobFolder = "Mobs"
-}
-
--- HITBOX CONFIG
-local HitboxConfig = {
-    enabled = true,
-    headSize = 10
-}
-
--- TELEPORT CONFIG
 local TeleportConfig = {
     bringPlayers = false,
     bringNPCs = false,
@@ -88,29 +61,10 @@ local ESPObjects = {}
 local NPCObjects = {}
 local Connections = {}
 local DrawingObjects = {}
-local modifiedParts = {}
-local originalProperties = {}
 
 local MAX_OBJECTS = 500
 local CLEANUP_INTERVAL = 15
 local lastCleanup = tick()
-
--- AIMBOT FOV CIRCLES
-local autoAimFOV = Drawing.new("Circle")
-autoAimFOV.Thickness = 2
-autoAimFOV.NumSides = 50
-autoAimFOV.Color = Color3.fromRGB(255, 255, 255)
-autoAimFOV.Transparency = 0.8
-autoAimFOV.Filled = false
-autoAimFOV.Visible = false
-
-local mouseAimFOV = Drawing.new("Circle")
-mouseAimFOV.Thickness = 2
-mouseAimFOV.NumSides = 50
-mouseAimFOV.Color = Color3.fromRGB(0, 255, 255)
-mouseAimFOV.Transparency = 0.8
-mouseAimFOV.Filled = false
-mouseAimFOV.Visible = false
 
 local function addDrawingObject(obj)
     table.insert(DrawingObjects, obj)
@@ -144,206 +98,16 @@ local function forceCleanupDrawingObjects()
     end
 end
 
--- HITBOX FUNCTIONS
-local function applyPropertiesToPart(part)
-    if part and not modifiedParts[part] then
-        -- Store original properties
-        originalProperties[part] = {
-            Size = part.Size,
-            Transparency = part.Transparency,
-            BrickColor = part.BrickColor,
-            Material = part.Material,
-            CanCollide = part.CanCollide,
-            Shape = part.Shape
-        }
-        
-        -- Apply new properties
-        part.Size = Vector3.new(HitboxConfig.headSize * 0.8, HitboxConfig.headSize, HitboxConfig.headSize * 0.8)
-        part.Shape = Enum.PartType.Block
-        part.Transparency = 0.5
-        part.BrickColor = BrickColor.new("Really red")
-        part.Material = Enum.Material.ForceField
-        part.CanCollide = false
-        
-        -- Add head mesh only if it doesn't exist
-        if not part:FindFirstChild("HeadCorner") then
-            local corner = Instance.new("SpecialMesh")
-            corner.Name = "HeadCorner"
-            corner.MeshType = Enum.MeshType.Head
-            corner.Scale = Vector3.new(1, 1, 1)
-            corner.Parent = part
-        end
-        
-        modifiedParts[part] = true
-        
-        -- Clean up when part is destroyed
-        part.AncestryChanged:Connect(function()
-            if not part.Parent then
-                modifiedParts[part] = nil
-                originalProperties[part] = nil
-            end
-        end)
-    end
-end
-
-local function restoreOriginalProperties(part)
-    if part and originalProperties[part] then
-        local original = originalProperties[part]
-        part.Size = original.Size
-        part.Transparency = original.Transparency
-        part.BrickColor = original.BrickColor
-        part.Material = original.Material
-        part.CanCollide = original.CanCollide
-        part.Shape = original.Shape
-        
-        -- Remove head mesh
-        local mesh = part:FindFirstChild("HeadCorner")
-        if mesh then mesh:Destroy() end
-        
-        modifiedParts[part] = nil
-        originalProperties[part] = nil
-    end
-end
-
--- AIMBOT FUNCTIONS
-local function getTeam(player)
-    return player:GetAttribute("Team") or -1
-end
-
-local function isEnemyForAim(player)
-    if player == LocalPlayer then return false end
-    if not player.Character or not player.Character:FindFirstChild(AimbotConfig.autoAim.aimPart) then return false end
-
-    local myTeam = getTeam(LocalPlayer)
-    local otherTeam = getTeam(player)
-
-    -- If I'm in FFA (-1), everyone else is an enemy
-    if myTeam == -1 then
-        return true
-    end
-    
-    -- If they're in FFA (-1), they're an enemy
-    if otherTeam == -1 then
-        return true
-    end
-    
-    -- Both have teams, check if different
-    return myTeam ~= otherTeam
-end
-
-local function isEnemyNPCForAim(model)
-    if not model:IsA("Model") then return false end
-    local part = model:FindFirstChild(AimbotConfig.autoAim.aimPart) or model:FindFirstChild("HumanoidRootPart")
-    if not part then return false end
-    local humanoid = model:FindFirstChildOfClass("Humanoid")
-    if humanoid and humanoid.Health <= 0 then return false end
-    
-    local myTeam = getTeam(LocalPlayer)
-    local npcTeam = model:GetAttribute("Team") or -1
-    
-    -- If I'm in FFA (-1), all NPCs are enemies
-    if myTeam == -1 then
-        return true
-    end
-    
-    -- If NPC is in FFA (-1), it's an enemy
-    if npcTeam == -1 then
-        return true
-    end
-    
-    -- Both have teams, check if different
-    return myTeam ~= npcTeam
-end
-
-local function hasLineOfSightAim(targetPart, config)
-    if not config.wallCheck then return true end
-    
-    local character = LocalPlayer.Character
-    if not character then return false end
-    local head = character:FindFirstChild("Head")
-    if not head then return false end
-    
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = {character, targetPart.Parent}
-    
-    local direction = targetPart.Position - head.Position
-    local result = workspace:Raycast(head.Position, direction, rayParams)
-    
-    return result == nil
-end
-
-local function isInFOVAim(targetPart, config)
-    local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
-    if not onScreen then return false end
-    
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
-    local distance = (mousePos - targetPos).Magnitude
-    
-    return distance <= config.fovSize
-end
-
-local function getClosestTargetAim(config)
-    local myChar = LocalPlayer.Character
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return nil end
-
-    local closest, shortest = nil, math.huge
-
-    -- Players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if isEnemyForAim(player) then
-            local part = player.Character and player.Character:FindFirstChild(config.aimPart)
-            if part then
-                local dist = (myHRP.Position - part.Position).Magnitude
-                if dist <= config.maxDistance and dist < shortest then
-                    if isInFOVAim(part, config) and hasLineOfSightAim(part, config) then
-                        closest = part
-                        shortest = dist
-                    end
-                end
-            end
-        end
-    end
-
-    -- NPCs
-    local mobFolder = workspace:FindFirstChild(AimbotConfig.mobFolder)
-    if mobFolder then
-        for _, mob in ipairs(mobFolder:GetChildren()) do
-            if isEnemyNPCForAim(mob) then
-                local part = mob:FindFirstChild(config.aimPart) or mob:FindFirstChild("HumanoidRootPart")
-                if part then
-                    local dist = (myHRP.Position - part.Position).Magnitude
-                    if dist <= config.maxDistance and dist < shortest then
-                        if isInFOVAim(part, config) and hasLineOfSightAim(part, config) then
-                            closest = part
-                            shortest = dist
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return closest
-end
-
--- FIXED: Proper team detection using Team attribute
 local function isTeammate(player)
     if not player or player == LocalPlayer then return false end
     
-    -- Get Team attribute from both players
     local localTeam = LocalPlayer:GetAttribute("Team")
     local playerTeam = player:GetAttribute("Team")
     
-    -- If either player doesn't have a Team attribute, they're not teammates
     if not localTeam or not playerTeam then return false end
     
-    -- Free for all mode (Team value -1)
     if localTeam == -1 or playerTeam == -1 then return false end
     
-    -- Same team if Team values match and aren't -1
     return localTeam == playerTeam
 end
 
@@ -353,9 +117,9 @@ local function getPlayerColor(player, isNPC)
     end
     
     if isTeammate(player) then
-        return ESPConfig.teammateColor -- Green for teammates
+        return ESPConfig.teammateColor
     else
-        return ESPConfig.enemyColor    -- Red for enemies
+        return ESPConfig.enemyColor
     end
 end
 
@@ -375,7 +139,6 @@ local function isNPC(character)
         return false
     end
     
-    -- Check if it's in workspace.Mobs (main way to identify mobs)
     if character.Parent and character.Parent.Name == "Mobs" then
         return true
     end
@@ -393,21 +156,16 @@ local function isNPC(character)
     return true
 end
 
--- NEW: Function to check if a mob/NPC is a teammate
 local function isMobTeammate(character)
     if not character then return false end
     
-    -- Get Team attribute from both local player and mob
     local localTeam = LocalPlayer:GetAttribute("Team")
     local mobTeam = character:GetAttribute("Team")
     
-    -- If either doesn't have a Team attribute, they're not teammates
     if not localTeam or not mobTeam then return false end
     
-    -- Free for all mode (Team value -1)
     if localTeam == -1 or mobTeam == -1 then return false end
     
-    -- Same team if Team values match and aren't -1
     return localTeam == mobTeam
 end
 
@@ -468,18 +226,15 @@ local function createHealthBar(position, health, maxHealth)
     return {bg = bg, bar = bar}
 end
 
--- NEW: Function to update visibility of ESP elements immediately
 local function updateESPVisibility(esp, isNPC, character)
     if not esp or not esp.objects then return end
     
     local shouldShow = true
     
     if isNPC then
-        -- For NPCs, check if NPC ESP is enabled
         if not ESPConfig.npcESP then
             shouldShow = false
         else
-            -- Check team settings for NPCs
             local isMobTeam = isMobTeammate(character)
             if isMobTeam and not ESPConfig.teammates then
                 shouldShow = false
@@ -488,7 +243,6 @@ local function updateESPVisibility(esp, isNPC, character)
             end
         end
     else
-        -- For players, check team settings
         local player = esp.player
         if player then
             local isPlayerTeammate = isTeammate(player)
@@ -500,12 +254,10 @@ local function updateESPVisibility(esp, isNPC, character)
         end
     end
     
-    -- Update chams visibility
     if esp.objects.chams and esp.objects.chams.highlight then
         esp.objects.chams.highlight.Enabled = shouldShow and ESPConfig.chams
     end
     
-    -- Update text elements visibility
     if esp.objects.info then
         local info = esp.objects.info
         
@@ -532,14 +284,11 @@ local function updateESPVisibility(esp, isNPC, character)
     end
 end
 
--- NEW: Function to update all ESP visibility immediately
 local function updateAllESPVisibility()
-    -- Update player ESP
     for player, esp in pairs(ESPObjects) do
         updateESPVisibility(esp, false, nil)
     end
     
-    -- Update NPC ESP
     for character, esp in pairs(NPCObjects) do
         updateESPVisibility(esp, true, character)
     end
@@ -614,7 +363,6 @@ local function createPlayerInfo(character, isNPC)
             return true
         end
         
-        -- Check if we should show this ESP based on current settings
         local shouldShow = true
         if isNPC then
             if not ESPConfig.npcESP then
@@ -700,17 +448,14 @@ local function createPlayerInfo(character, isNPC)
                 info.healthText.Visible = true
             end
             yOffset = yOffset + ESPConfig.textSize + 5
-            
             if not info.healthBar then
                 info.healthBar = createHealthBar(Vector2.new(headPos.X, headPos.Y + yOffset), health, maxHealth)
             else
                 local healthPercentage = math.clamp(health / maxHealth, 0, 1)
                 local barWidth = 50
-                
                 info.healthBar.bg.Position = Vector2.new(headPos.X - barWidth/2, headPos.Y + yOffset)
                 info.healthBar.bar.Position = Vector2.new(headPos.X - barWidth/2, headPos.Y + yOffset)
                 info.healthBar.bar.Size = Vector2.new(barWidth * healthPercentage, 6)
-                
                 if healthPercentage > 0.6 then
                     info.healthBar.bar.Color = Color3.fromRGB(0, 255, 0)
                 elseif healthPercentage > 0.3 then
@@ -718,7 +463,6 @@ local function createPlayerInfo(character, isNPC)
                 else
                     info.healthBar.bar.Color = Color3.fromRGB(255, 0, 0)
                 end
-                
                 info.healthBar.bg.Visible = true
                 info.healthBar.bar.Visible = true
             end
@@ -757,8 +501,7 @@ local function createChams(character, isNPC)
     highlight.OutlineTransparency = 0.5
     
     if isNPC then
-        -- For mobs, check team and color accordingly
-        local color = getPlayerColor(character, true)  -- Pass character for mob team check
+        local color = getPlayerColor(character, true)
         highlight.FillColor = color
         highlight.OutlineColor = color
     else
@@ -798,7 +541,6 @@ local function createESP(player)
     
     ESPObjects[player] = esp
     
-    -- Update visibility immediately based on current settings
     task.spawn(function()
         updateESPVisibility(esp, false, nil)
     end)
@@ -823,7 +565,6 @@ local function createNPCESP(character)
     
     NPCObjects[character] = npcESP
     
-    -- Update visibility immediately based on current settings
     task.spawn(function()
         updateESPVisibility(npcESP, true, character)
     end)
@@ -938,7 +679,6 @@ end
 local function scanForNPCs()
     if not ESPConfig.npcESP then return end
     
-    -- Scan workspace.Mobs specifically
     local mobsFolder = Workspace:FindFirstChild("Mobs")
     if mobsFolder then
         for _, mob in pairs(mobsFolder:GetChildren()) do
@@ -948,7 +688,6 @@ local function scanForNPCs()
         end
     end
     
-    -- Also scan other areas for NPCs (backup)
     for _, obj in pairs(Workspace:GetDescendants()) do
         if obj:IsA("Model") and isNPC(obj) and not NPCObjects[obj] then
             createNPCESP(obj)
@@ -959,7 +698,6 @@ end
 local function enableESP()
     ESPConfig.enabled = true
     
-    -- Create new ESP
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
             createESP(player)
@@ -985,45 +723,6 @@ local function disableESP()
     forceCleanupDrawingObjects()
 end
 
-local function enableHitbox()
-    HitboxConfig.enabled = true
-    
-    -- Apply hitbox to existing players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            if isEnemyForAim(player) then
-                pcall(function()
-                    applyPropertiesToPart(player.Character.HumanoidRootPart)
-                end)
-            end
-        end
-    end
-
-    -- Apply hitbox to existing NPCs
-    local mobsFolder = Workspace:FindFirstChild("Mobs")
-    if mobsFolder then
-        for _, mob in ipairs(mobsFolder:GetChildren()) do
-            if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") then
-                if isEnemyNPCForAim(mob) then
-                    pcall(function()
-                        applyPropertiesToPart(mob.HumanoidRootPart)
-                    end)
-                end
-            end
-        end
-    end
-end
-
-local function disableHitbox()
-    HitboxConfig.enabled = false
-    
-    for part, _ in pairs(modifiedParts) do
-        pcall(function()
-            restoreOriginalProperties(part)
-        end)
-    end
-end
-
 local function enableTeleportPlayers()
     TeleportConfig.bringPlayers = true
 end
@@ -1041,7 +740,6 @@ local function disableTeleportNPCs()
 end
 
 local function setupEventConnections()
-    -- Clear existing connections first
     for name, connection in pairs(Connections) do
         if connection then
             if typeof(connection) == "RBXScriptConnection" then
@@ -1053,59 +751,35 @@ local function setupEventConnections()
     end
     Connections = {}
     
-    -- Enhanced player added handling
     Connections.playerAdded = Players.PlayerAdded:Connect(function(player)
         local function onCharacterAdded(character)
             if ESPConfig.enabled then
-                task.wait(1) -- Wait for character to fully load
+                task.wait(1)
                 createESP(player)
-            end
-            if HitboxConfig.enabled and character:FindFirstChild("HumanoidRootPart") and isEnemyForAim(player) then
-                pcall(function()
-                    applyPropertiesToPart(character.HumanoidRootPart)
-                end)
             end
         end
         
-        -- Connect to current character if it exists
         if player.Character then
             onCharacterAdded(player.Character)
         end
         
-        -- Connect to future characters
         player.CharacterAdded:Connect(onCharacterAdded)
         
         player.CharacterRemoving:Connect(function(character)
             removeESP(player)
-            if character:FindFirstChild("HumanoidRootPart") then
-                pcall(function()
-                    restoreOriginalProperties(character.HumanoidRootPart)
-                end)
-            end
         end)
     end)
     
     Connections.playerRemoving = Players.PlayerRemoving:Connect(function(player)
         removeESP(player)
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            pcall(function()
-                restoreOriginalProperties(player.Character.HumanoidRootPart)
-            end)
-        end
     end)
     
-    -- Setup existing players
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local function onCharacterAdded(character)
                 if ESPConfig.enabled then
                     task.wait(1)
                     createESP(player)
-                end
-                if HitboxConfig.enabled and character:FindFirstChild("HumanoidRootPart") and isEnemyForAim(player) then
-                    pcall(function()
-                        applyPropertiesToPart(character.HumanoidRootPart)
-                    end)
                 end
             end
             
@@ -1117,16 +791,10 @@ local function setupEventConnections()
             
             player.CharacterRemoving:Connect(function(character)
                 removeESP(player)
-                if character:FindFirstChild("HumanoidRootPart") then
-                    pcall(function()
-                        restoreOriginalProperties(character.HumanoidRootPart)
-                    end)
-                end
             end)
         end
     end
     
-    -- Monitor workspace.Mobs specifically
     local mobsFolder = Workspace:FindFirstChild("Mobs")
     if mobsFolder then
         Connections.mobsChildAdded = mobsFolder.ChildAdded:Connect(function(child)
@@ -1136,21 +804,11 @@ local function setupEventConnections()
                     createNPCESP(child)
                 end
             end
-            if HitboxConfig.enabled and child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") and isEnemyNPCForAim(child) then
-                pcall(function()
-                    applyPropertiesToPart(child.HumanoidRootPart)
-                end)
-            end
         end)
         
         Connections.mobsChildRemoved = mobsFolder.ChildRemoved:Connect(function(child)
             if NPCObjects[child] then
                 removeNPCESP(child)
-            end
-            if child:FindFirstChild("HumanoidRootPart") then
-                pcall(function()
-                    restoreOriginalProperties(child.HumanoidRootPart)
-                end)
             end
         end)
     end
@@ -1162,11 +820,6 @@ local function setupEventConnections()
                 createNPCESP(child)
             end
         end
-        if HitboxConfig.enabled and child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") and isEnemyNPCForAim(child) then
-            pcall(function()
-                applyPropertiesToPart(child.HumanoidRootPart)
-            end)
-        end
     end)
     
     Connections.descendantAdded = Workspace.DescendantAdded:Connect(function(descendant)
@@ -1176,21 +829,11 @@ local function setupEventConnections()
                 createNPCESP(descendant)
             end
         end
-        if HitboxConfig.enabled and descendant:IsA("Model") and descendant:FindFirstChild("HumanoidRootPart") and isEnemyNPCForAim(descendant) then
-            pcall(function()
-                applyPropertiesToPart(descendant.HumanoidRootPart)
-            end)
-        end
     end)
     
     Connections.childRemoved = Workspace.ChildRemoved:Connect(function(child)
         if NPCObjects[child] then
             removeNPCESP(child)
-        end
-        if child:FindFirstChild("HumanoidRootPart") then
-            pcall(function()
-                restoreOriginalProperties(child.HumanoidRootPart)
-            end)
         end
     end)
     
@@ -1215,35 +858,6 @@ local function setupEventConnections()
                     scanForNPCs()
                 end
             end)
-        end
-    end)
-    
-    Connections.hitboxUpdate = RunService.RenderStepped:Connect(function()
-        if HitboxConfig.enabled then
-            -- Players
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                    if isEnemyForAim(player) then
-                        pcall(function()
-                            applyPropertiesToPart(player.Character.HumanoidRootPart)
-                        end)
-                    end
-                end
-            end
-
-            -- NPCs/Mobs
-            local mobsFolder = Workspace:FindFirstChild("Mobs")
-            if mobsFolder then
-                for _, mob in ipairs(mobsFolder:GetChildren()) do
-                    if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") then
-                        if isEnemyNPCForAim(mob) then
-                            pcall(function()
-                                applyPropertiesToPart(mob.HumanoidRootPart)
-                            end)
-                        end
-                    end
-                end
-            end
         end
     end)
     
@@ -1281,65 +895,537 @@ local function setupEventConnections()
             end
         end
     end)
-    
-    -- AIMBOT MAIN LOOP
-    Connections.aimbot = RunService.RenderStepped:Connect(function()
-        -- Update FOV Circles
-        autoAimFOV.Position = Vector2.new(Mouse.X, Mouse.Y)
-        autoAimFOV.Radius = AimbotConfig.autoAim.fovSize
-        autoAimFOV.Visible = AimbotConfig.autoAim.showFOV
-        
-        mouseAimFOV.Position = Vector2.new(Mouse.X, Mouse.Y)
-        mouseAimFOV.Radius = AimbotConfig.mouseAim.fovSize
-        mouseAimFOV.Visible = AimbotConfig.mouseAim.showFOV
-        
-        -- Auto Aim
-        if AimbotConfig.autoAim.enabled then
-            local target = getClosestTargetAim(AimbotConfig.autoAim)
-            if target then
-                local camPos = Camera.CFrame.Position
-                local direction = (target.Position - camPos).Unit
-                local goalCFrame = CFrame.new(camPos, camPos + direction)
+end
 
-                -- Smooth blend
-                Camera.CFrame = Camera.CFrame:Lerp(goalCFrame, math.clamp(1 / AimbotConfig.autoAim.smoothing, 0, 1))
+local AimbotConfig = {
+    enabled = false,
+    aimPart = "Head",
+    fovSize = 90,
+    smoothing = 1,
+    maxDistance = 300,
+    wallCheck = true,
+    showFOV = false
+}
+
+local lockedTarget = nil
+local isLocked = false
+
+local autoAimFOV = Drawing.new("Circle")
+autoAimFOV.Thickness = 2
+autoAimFOV.NumSides = 50
+autoAimFOV.Color = Color3.fromRGB(255, 255, 255)
+autoAimFOV.Transparency = 0.8
+autoAimFOV.Filled = false
+autoAimFOV.Visible = false
+
+local function getTeam(player)
+    return player:GetAttribute("Team") or -1
+end
+
+local function isEnemyForAim(player)
+    if player == LocalPlayer then return false end
+    if not player.Character or not player.Character:FindFirstChild(AimbotConfig.aimPart) then return false end
+
+    local myTeam = getTeam(LocalPlayer)
+    local otherTeam = getTeam(player)
+
+    if myTeam == -1 then
+        return true
+    end
+    
+    if otherTeam == -1 then
+        return true
+    end
+    
+    return myTeam ~= otherTeam
+end
+
+local function isEnemyNPCForAim(model)
+    if not model:IsA("Model") then return false end
+    local part = model:FindFirstChild(AimbotConfig.aimPart) or model:FindFirstChild("HumanoidRootPart")
+    if not part then return false end
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid and humanoid.Health <= 0 then return false end
+    
+    local myTeam = getTeam(LocalPlayer)
+    local npcTeam = model:GetAttribute("Team") or -1
+    
+    if myTeam == -1 then
+        return true
+    end
+    
+    if npcTeam == -1 then
+        return true
+    end
+    
+    return myTeam ~= npcTeam
+end
+
+local function hasLineOfSightAim(targetPart)
+    if not AimbotConfig.wallCheck then return true end
+    
+    local character = LocalPlayer.Character
+    if not character then return false end
+    local head = character:FindFirstChild("Head")
+    if not head then return false end
+    
+    local startPosition = head.Position
+    local targetPosition = targetPart.Position
+    local direction = (targetPosition - startPosition).Unit
+    local distance = (targetPosition - startPosition).Magnitude
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.IgnoreWater = true
+    
+    local filterList = {}
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            table.insert(filterList, player.Character)
+        end
+    end
+    
+    local mobFolder = workspace:FindFirstChild("Mobs")
+    if mobFolder then
+        for _, mob in pairs(mobFolder:GetChildren()) do
+            if mob:IsA("Model") and mob:FindFirstChildOfClass("Humanoid") then
+                table.insert(filterList, mob)
+            end
+        end
+    end
+    
+    raycastParams.FilterDescendantsInstances = filterList
+    
+    local rayDirection = direction * (distance - 2)
+    local raycastResult = workspace:Raycast(startPosition, rayDirection, raycastParams)
+    
+    return raycastResult == nil
+end
+
+local function isInFOVAim(targetPart)
+    local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+    if not onScreen then return false end
+    
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
+    local distance = (mousePos - targetPos).Magnitude
+    
+    return distance <= AimbotConfig.fovSize
+end
+
+local function isLockedTargetValid()
+    if not lockedTarget or not lockedTarget.Parent then 
+        return false 
+    end
+    
+    if not lockedTarget.Parent.Parent then
+        return false
+    end
+    
+    local player = Players:GetPlayerFromCharacter(lockedTarget.Parent)
+    if player then
+        if not player.Character then return false end
+        if not player.Character:FindFirstChild(AimbotConfig.aimPart) then return false end
+        if not isEnemyForAim(player) then return false end
+        
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return false end
+    else
+        if not isEnemyNPCForAim(lockedTarget.Parent) then return false end
+        
+        local humanoid = lockedTarget.Parent:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return false end
+    end
+    
+    local myChar = LocalPlayer.Character
+    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return false end
+    
+    local dist = (myHRP.Position - lockedTarget.Position).Magnitude
+    if dist > (AimbotConfig.maxDistance + 100) then return false end
+    
+    if tick() % 0.2 < 0.033 then
+        if not hasLineOfSightAim(lockedTarget) then 
+            return false 
+        end
+    end
+    
+    return true
+end
+
+local function findNewTarget()
+    if isLocked then return nil end
+    
+    local myChar = LocalPlayer.Character
+    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return nil end
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if isEnemyForAim(player) then
+            local part = player.Character and player.Character:FindFirstChild(AimbotConfig.aimPart)
+            if part then
+                local dist = (myHRP.Position - part.Position).Magnitude
+                if dist <= AimbotConfig.maxDistance then
+                    if isInFOVAim(part) and hasLineOfSightAim(part) then
+                        return part
+                    end
+                end
+            end
+        end
+    end
+
+    local mobFolder = workspace:FindFirstChild("Mobs")
+    if mobFolder then
+        for _, mob in pairs(mobFolder:GetChildren()) do
+            if isEnemyNPCForAim(mob) then
+                local part = mob:FindFirstChild(AimbotConfig.aimPart) or mob:FindFirstChild("HumanoidRootPart")
+                if part then
+                    local dist = (myHRP.Position - part.Position).Magnitude
+                    if dist <= AimbotConfig.maxDistance then
+                        if isInFOVAim(part) and hasLineOfSightAim(part) then
+                            return part
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function unlockTarget()
+    lockedTarget = nil
+    isLocked = false
+end
+
+local aimbotConnection
+local function enableAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+    end
+    
+    aimbotConnection = RunService.RenderStepped:Connect(function()
+        autoAimFOV.Position = Vector2.new(Mouse.X, Mouse.Y)
+        autoAimFOV.Radius = AimbotConfig.fovSize
+        autoAimFOV.Visible = AimbotConfig.showFOV and AimbotConfig.enabled
+        
+        if not AimbotConfig.enabled then
+            return
+        end
+        
+        if isLocked and lockedTarget then
+            if not isLockedTargetValid() then
+                unlockTarget()
             end
         end
         
-        -- Mouse Aimbot
-        if AimbotConfig.mouseAim.enabled and AimbotConfig.mouseAim.holdingRightClick then
-            local target = getClosestTargetAim(AimbotConfig.mouseAim)
-            if target then
-                local camPos = Camera.CFrame.Position
-                local direction = (target.Position - camPos).Unit
-                local targetCFrame = CFrame.new(camPos, camPos + direction)
-                
-                Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 1 / AimbotConfig.mouseAim.smoothing)
+        if not isLocked then
+            local newTarget = findNewTarget()
+            if newTarget then
+                lockedTarget = newTarget
+                isLocked = true
             end
         end
-    end)
-    
-    -- AIMBOT INPUT EVENTS
-    Connections.aimbotInput = UserInputService.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
         
-        if input.UserInputType == Enum.UserInputType.MouseButton2 then
-            AimbotConfig.mouseAim.holdingRightClick = true
-        end
-    end)
-    
-    Connections.aimbotInputEnd = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton2 then
-            AimbotConfig.mouseAim.holdingRightClick = false
+        if isLocked and lockedTarget then
+            local camPos = Camera.CFrame.Position
+            local direction = (lockedTarget.Position - camPos).Unit
+            local goalCFrame = CFrame.new(camPos, camPos + direction)
+
+            local smoothFactor = math.clamp(1 / AimbotConfig.smoothing, 0, 1)
+            Camera.CFrame = Camera.CFrame:Lerp(goalCFrame, smoothFactor)
         end
     end)
 end
- 
+
+local function disableAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+        aimbotConnection = nil
+    end
+    autoAimFOV.Visible = false
+    unlockTarget()
+end
+
+local HitboxConfig = {
+    enabled = false,
+    headSize = 10,
+    applyToPlayers = true,
+    applyToNPCs = true,
+    onlyEnemies = true
+}
+
+local modifiedParts = {}
+local originalProperties = {}
+local connections = {}
+local monitoredNPCs = {}
+
+local function getNPCLocations()
+    local locations = {}
+    
+    local mobsInWorkspace = Workspace:FindFirstChild("Mobs")
+    if mobsInWorkspace then table.insert(locations, mobsInWorkspace) end
+    
+    local botsInReplicatedStorage = ReplicatedStorage:FindFirstChild("Bots")
+    if botsInReplicatedStorage then table.insert(locations, botsInReplicatedStorage) end
+    
+    local mobsInReplicatedStorage = ReplicatedStorage:FindFirstChild("Mobs")
+    if mobsInReplicatedStorage then table.insert(locations, mobsInReplicatedStorage) end
+    
+    return locations
+end
+
+local function isEnemy(entity)
+    if not entity then return false end
+    
+    local localTeam = getTeam(LocalPlayer)
+    local entityTeam = getTeam(entity)
+    
+    if localTeam == -1 then return true end
+    if entityTeam == -1 then return true end
+    
+    return localTeam ~= entityTeam
+end
+
+local function applyHitboxProperties(part, entity)
+    if not part or modifiedParts[part] or not HitboxConfig.enabled then return end
+    if HitboxConfig.onlyEnemies and not isEnemy(entity) then return end
+    
+    originalProperties[part] = {
+        Size = part.Size,
+        Transparency = part.Transparency,
+        BrickColor = part.BrickColor,
+        Material = part.Material,
+        CanCollide = part.CanCollide,
+        Shape = part.Shape
+    }
+    
+    pcall(function()
+        part.Size = Vector3.new(HitboxConfig.headSize, HitboxConfig.headSize, HitboxConfig.headSize)
+        part.Shape = Enum.PartType.Block
+        part.Transparency = 0.5
+        part.BrickColor = BrickColor.new("Really red")
+        part.Material = Enum.Material.ForceField
+        part.CanCollide = false
+        
+        local mesh = part:FindFirstChild("HitboxMesh")
+        if not mesh then
+            mesh = Instance.new("SpecialMesh")
+            mesh.Name = "HitboxMesh"
+            mesh.Parent = part
+        end
+        mesh.MeshType = Enum.MeshType.Head
+        mesh.Scale = Vector3.new(1, 1, 1)
+        
+        modifiedParts[part] = true
+    end)
+end
+
+local function restoreOriginalProperties(part)
+    if not part or not originalProperties[part] then return end
+    
+    local original = originalProperties[part]
+    pcall(function()
+        part.Size = original.Size
+        part.Transparency = original.Transparency
+        part.BrickColor = original.BrickColor
+        part.Material = original.Material
+        part.CanCollide = original.CanCollide
+        part.Shape = original.Shape
+        
+        local mesh = part:FindFirstChild("HitboxMesh")
+        if mesh then mesh:Destroy() end
+    end)
+    
+    modifiedParts[part] = nil
+    originalProperties[part] = nil
+end
+
+local function cleanupPart(part)
+    if connections[part] then
+        pcall(function()
+            connections[part]:Disconnect()
+        end)
+        connections[part] = nil
+    end
+    restoreOriginalProperties(part)
+end
+
+local function processCharacter(character, entity)
+    if not character or not character:IsA("Model") then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    if HitboxConfig.enabled then
+        if entity:IsA("Player") and HitboxConfig.applyToPlayers then
+            applyHitboxProperties(hrp, entity)
+        elseif isNPC(character) and HitboxConfig.applyToNPCs then
+            applyHitboxProperties(hrp, character)
+        end
+    end
+    
+    if not connections[hrp] then
+        connections[hrp] = hrp.AncestryChanged:Connect(function()
+            if not hrp.Parent then
+                cleanupPart(hrp)
+            end
+        end)
+    end
+end
+
+local function monitorPlayer(player)
+    if player == LocalPlayer then return end
+    
+    local function onCharacterAdded(character)
+        task.wait(0.5)
+        processCharacter(character, player)
+    end
+    
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    
+    player.CharacterAdded:Connect(onCharacterAdded)
+    player.CharacterRemoving:Connect(function(character)
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then cleanupPart(hrp) end
+    end)
+end
+
+local function monitorNPC(npc)
+    if not isNPC(npc) or monitoredNPCs[npc] then return end
+    
+    monitoredNPCs[npc] = true
+    
+    local function checkAndApply()
+        if HitboxConfig.enabled and HitboxConfig.applyToNPCs then
+            processCharacter(npc, npc)
+        end
+    end
+    
+    checkAndApply()
+    
+    local connection = npc.AncestryChanged:Connect(function()
+        if not npc.Parent then
+            monitoredNPCs[npc] = nil
+            local hrp = npc:FindFirstChild("HumanoidRootPart")
+            if hrp then cleanupPart(hrp) end
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+    end)
+end
+
+local function scanForNPCs()
+    if not ESPConfig.npcESP then return end
+    
+    local mobsFolder = Workspace:FindFirstChild("Mobs")
+    if mobsFolder then
+        for _, mob in pairs(mobsFolder:GetChildren()) do
+            if mob:IsA("Model") and isNPC(mob) and not NPCObjects[mob] then
+                createNPCESP(mob)
+            end
+        end
+    end
+    
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and isNPC(obj) and not NPCObjects[obj] then
+            createNPCESP(obj)
+        end
+    end
+end
+
+local function enableHitbox()
+    HitboxConfig.enabled = true
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            processCharacter(player.Character, player)
+        end
+    end
+    
+    scanForNPCs()
+end
+
+local function disableHitbox()
+    HitboxConfig.enabled = false
+    
+    for part, _ in pairs(modifiedParts) do
+        cleanupPart(part)
+    end
+end
+
+local function refreshHitbox()
+    if not HitboxConfig.enabled then return end
+    
+    disableHitbox()
+    task.wait(0.1)
+    enableHitbox()
+end
+
+local function setupHitboxConnections()
+    for _, player in pairs(Players:GetPlayers()) do
+        monitorPlayer(player)
+    end
+    
+    Players.PlayerAdded:Connect(monitorPlayer)
+    Players.PlayerRemoving:Connect(function(player)
+        if player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then cleanupPart(hrp) end
+        end
+    end)
+    
+    local locations = getNPCLocations()
+    for _, location in pairs(locations) do
+        if location then
+            location.ChildAdded:Connect(function(child)
+                if child:IsA("Model") then
+                    task.wait(0.5)
+                    if isNPC(child) then
+                        monitorNPC(child)
+                    end
+                end
+            end)
+        end
+    end
+    
+    task.spawn(function()
+        while true do
+            task.wait(3)
+            if HitboxConfig.enabled then
+                pcall(scanForNPCs)
+            end
+        end
+    end)
+    
+    task.spawn(function()
+        while true do
+            task.wait(10)
+            
+            for part, _ in pairs(modifiedParts) do
+                if not part.Parent then
+                    cleanupPart(part)
+                end
+            end
+            
+            for npc, _ in pairs(monitoredNPCs) do
+                if not npc.Parent then
+                    monitoredNPCs[npc] = nil
+                end
+            end
+        end
+    end)
+end
 
 local MainTab = Window:CreateTab("Principale", 4483362458)
 local VisualsTab = Window:CreateTab("Grafica", 4483362458)
-local AimbotTab = Window:CreateTab("Automira", 4483362458)
 local TeleportTab = Window:CreateTab("Teletrasporto", 4483362458)
+local AimbotTab = Window:CreateTab("Auto Aimbot", 4483362458)
 
 local MainSection = MainTab:CreateSection("Controlli ESP")
 
@@ -1363,7 +1449,6 @@ local ChamsToggle = MainTab:CreateToggle({
    Flag = "ChamsToggle",
    Callback = function(Value)
        ESPConfig.chams = Value
-       -- Immediately update all existing ESP chams
        for player, esp in pairs(ESPObjects) do
            if esp.objects.chams and esp.objects.chams.highlight then
                esp.objects.chams.highlight.Enabled = Value
@@ -1383,7 +1468,6 @@ local TeammatesToggle = MainTab:CreateToggle({
    Flag = "TeammatesToggle",
    Callback = function(Value)
        ESPConfig.teammates = Value
-       -- Immediately update visibility for all ESP
        updateAllESPVisibility()
    end,
 })
@@ -1394,7 +1478,6 @@ local EnemiesToggle = MainTab:CreateToggle({
    Flag = "EnemiesToggle",
    Callback = function(Value)
        ESPConfig.enemies = Value
-       -- Immediately update visibility for all ESP
        updateAllESPVisibility()
    end,
 })
@@ -1405,40 +1488,9 @@ local NPCToggle = MainTab:CreateToggle({
    Flag = "NPCToggle",
    Callback = function(Value)
        ESPConfig.npcESP = Value
-       -- Immediately update visibility for all NPC ESP
        updateAllESPVisibility()
-       -- If enabled and ESP is on, scan for new NPCs
        if Value and ESPConfig.enabled then
            task.spawn(scanForNPCs)
-       end
-   end,
-})
-
-local HitboxToggle = MainTab:CreateToggle({
-   Name = "Abilita Hitbox",
-   CurrentValue = true,
-   Flag = "HitboxToggle",
-   Callback = function(Value)
-       HitboxConfig.enabled = Value
-       if Value then
-           enableHitbox()
-       else
-           disableHitbox()
-       end
-   end,
-})
-
-local HitboxSizeSlider = MainTab:CreateSlider({
-   Name = "Dimensioni Hitbox",
-   Range = {5, 50},
-   Increment = 1,
-   CurrentValue = 10,
-   Flag = "HitboxSize",
-   Callback = function(Value)
-       HitboxConfig.headSize = Value
-       if HitboxConfig.enabled then
-           disableHitbox()
-           enableHitbox()
        end
    end,
 })
@@ -1454,6 +1506,31 @@ local NoCooldownButton = MainTab:CreateButton({
    end,
 })
 
+local EnableHitboxToggle = MainTab:CreateToggle({
+    Name = "Abilita Hitbox",
+    CurrentValue = false,
+    Flag = "EnableHitbox",
+    Callback = function(Value)
+        if Value then
+            enableHitbox()
+        else
+            disableHitbox()
+        end
+    end,
+})
+
+local RefreshHitboxButton = MainTab:CreateButton({
+    Name = "Aggiorna Hitbox",
+    Callback = function()
+        refreshHitbox()
+        Rayfield:Notify({
+            Title = "Hitbox aggiornato",
+            Content = "Tutte le hitbox sono state riapplicate!",
+            Duration = 2,
+        })
+    end,
+})
+
 local VisualsSection = VisualsTab:CreateSection("Elementi visivi")
 
 local NamesToggle = VisualsTab:CreateToggle({
@@ -1462,7 +1539,6 @@ local NamesToggle = VisualsTab:CreateToggle({
    Flag = "NamesToggle",
    Callback = function(Value)
        ESPConfig.names = Value
-       -- Immediately update visibility for all name text
        for player, esp in pairs(ESPObjects) do
            if esp.objects.info and esp.objects.info.nameText then
                esp.objects.info.nameText.Visible = Value and ESPConfig.enabled
@@ -1482,7 +1558,6 @@ local HealthToggle = VisualsTab:CreateToggle({
    Flag = "HealthToggle",
    Callback = function(Value)
        ESPConfig.health = Value
-       -- Immediately update visibility for all health elements
        for player, esp in pairs(ESPObjects) do
            if esp.objects.info then
                if esp.objects.info.healthText then
@@ -1522,7 +1597,6 @@ local DistanceToggle = VisualsTab:CreateToggle({
    Flag = "DistanceToggle",
    Callback = function(Value)
        ESPConfig.distance = Value
-       -- Immediately update visibility for all distance text
        for player, esp in pairs(ESPObjects) do
            if esp.objects.info and esp.objects.info.distanceText then
                esp.objects.info.distanceText.Visible = Value and ESPConfig.enabled
@@ -1544,7 +1618,6 @@ local TextSizeSlider = VisualsTab:CreateSlider({
    Flag = "TextSize",
    Callback = function(Value)
        ESPConfig.textSize = Value
-       -- Immediately update text size for all ESP text elements
        for player, esp in pairs(ESPObjects) do
            if esp.objects.info then
                if esp.objects.info.nameText then
@@ -1626,23 +1699,28 @@ local TeleportDistanceSlider = TeleportTab:CreateSlider({
    end,
 })
 
-local AimbotSection = AimbotTab:CreateSection("Auto Aimbot")
+local AimbotSection = AimbotTab:CreateSection("Impostazioni Auto Aimbot")
 
 local AutoAimToggle = AimbotTab:CreateToggle({
    Name = "Auto Aimbot",
    CurrentValue = false,
    Flag = "AutoAimToggle",
    Callback = function(Value)
-       AimbotConfig.autoAim.enabled = Value
+       AimbotConfig.enabled = Value
+       if Value then
+           enableAimbot()
+       else
+           disableAimbot()
+       end
    end,
 })
 
 local AutoAimFOVToggle = AimbotTab:CreateToggle({
-   Name = "FOV Circle",
+   Name = "Mostra cerchio FOV",
    CurrentValue = false,
    Flag = "AutoAimFOVToggle",
    Callback = function(Value)
-       AimbotConfig.autoAim.showFOV = Value
+       AimbotConfig.showFOV = Value
    end,
 })
 
@@ -1653,29 +1731,29 @@ local AutoAimFOVSlider = AimbotTab:CreateSlider({
    CurrentValue = 90,
    Flag = "AutoAimFOV",
    Callback = function(Value)
-       AimbotConfig.autoAim.fovSize = Value
+       AimbotConfig.fovSize = Value
    end,
 })
 
 local AutoAimSmoothingSlider = AimbotTab:CreateSlider({
    Name = "AIM Smoothing",
-   Range = {1, 10},
+   Range = {0.1, 10},
    Increment = 0.1,
    CurrentValue = 1,
    Flag = "AutoAimSmoothing",
    Callback = function(Value)
-       AimbotConfig.autoAim.smoothing = Value
+       AimbotConfig.smoothing = Value
    end,
 })
 
 local AutoAimDistanceSlider = AimbotTab:CreateSlider({
-   Name = "Distanza di mira",
+   Name = "Distanza massima di mira",
    Range = {50, 1000},
    Increment = 10,
    CurrentValue = 300,
    Flag = "AutoAimDistance",
    Callback = function(Value)
-       AimbotConfig.autoAim.maxDistance = Value
+       AimbotConfig.maxDistance = Value
    end,
 })
 
@@ -1684,73 +1762,9 @@ local AutoAimWallCheckToggle = AimbotTab:CreateToggle({
    CurrentValue = true,
    Flag = "AutoAimWallCheck",
    Callback = function(Value)
-       AimbotConfig.autoAim.wallCheck = Value
+       AimbotConfig.wallCheck = Value
    end,
 })
-
-local MouseAimbotSection = AimbotTab:CreateSection("Mouse Aimbot (tenere premut...")
-
-local MouseAimToggle = AimbotTab:CreateToggle({
-   Name = "Mouse Aimbot",
-   CurrentValue = false,
-   Flag = "MouseAimToggle",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.enabled = Value
-   end,
-})
-
-local MouseAimFOVToggle = AimbotTab:CreateToggle({
-   Name = "FOV Circle",
-   CurrentValue = false,
-   Flag = "MouseAimFOVToggle",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.showFOV = Value
-   end,
-})
-
-local MouseAimFOVSlider = AimbotTab:CreateSlider({
-   Name = "Dimensione FOV",
-   Range = {10, 500},
-   Increment = 5,
-   CurrentValue = 150,
-   Flag = "MouseAimFOV",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.fovSize = Value
-   end,
-})
-
-local MouseAimSmoothingSlider = AimbotTab:CreateSlider({
-   Name = "Levigante per la mira del m...",
-   Range = {1, 10},
-   Increment = 0.1,
-   CurrentValue = 1,
-   Flag = "MouseAimSmoothing",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.smoothing = Value
-   end,
-})
-
-local MouseAimDistanceSlider = AimbotTab:CreateSlider({
-   Name = "Distanza di mira del mouse",
-   Range = {50, 1000},
-   Increment = 10,
-   CurrentValue = 300,
-   Flag = "MouseAimDistance",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.maxDistance = Value
-   end,
-})
-
-local MouseAimWallCheckToggle = AimbotTab:CreateToggle({
-   Name = "Controllo a parete",
-   CurrentValue = true,
-   Flag = "MouseAimWallCheck",
-   Callback = function(Value)
-       AimbotConfig.mouseAim.wallCheck = Value
-   end,
-})
-
-local AimbotSettingsSection = AimbotTab:CreateSection("Impostazioni Aimbot")
 
 local AimPartDropdown = AimbotTab:CreateDropdown({
    Name = "Parte di obiettivo",
@@ -1758,23 +1772,52 @@ local AimPartDropdown = AimbotTab:CreateDropdown({
    CurrentOption = "Head",
    Flag = "AimPart",
    Callback = function(Option)
-       AimbotConfig.autoAim.aimPart = Option
-       AimbotConfig.mouseAim.aimPart = Option
+       AimbotConfig.aimPart = Option
+       unlockTarget()
    end,
 })
 
--- Initialize the ESP system
-setupEventConnections()
-enableESP()
-enableHitbox()
+local UnlockTargetButton = AimbotTab:CreateButton({
+   Name = "Forza sblocco bersaglio",
+   Callback = function()
+       unlockTarget()
+   end,
+})
 
--- Enhanced game close handler
+local TargetStatusSection = AimbotTab:CreateSection("Stato Target")
+local targetStatusLabel = AimbotTab:CreateLabel("Target: None")
+
+local statusUpdateConnection
+statusUpdateConnection = RunService.Heartbeat:Connect(function()
+    if isLocked and lockedTarget then
+        local targetName = "Sconosciuto"
+        local player = Players:GetPlayerFromCharacter(lockedTarget.Parent)
+        if player then
+            targetName = player.Name
+        else
+            targetName = lockedTarget.Parent.Name or "NPC"
+        end
+        targetStatusLabel:Set("Target: " .. targetName .. " (LOCKED)")
+    else
+        targetStatusLabel:Set("Target: None")
+    end
+end)
+
+enableAimbot()
+setupEventConnections()
+setupHitboxConnections()
+enableESP()
+
 game:BindToClose(function()
     disableESP()
-    disableHitbox()
     disableTeleportPlayers()
     disableTeleportNPCs()
-    
+    disableAimbot()
+    disableHitbox()
+    if statusUpdateConnection then
+        statusUpdateConnection:Disconnect()
+    end
+    pcall(function() autoAimFOV:Remove() end)
     for _, connection in pairs(Connections) do
         if connection then
             if typeof(connection) == "RBXScriptConnection" then
@@ -1784,24 +1827,30 @@ game:BindToClose(function()
             end
         end
     end
-    
+    for _, connection in pairs(connections) do
+        if connection then
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+    end
+    modifiedParts = {}
+    originalProperties = {}
+    connections = {}
+    monitoredNPCs = {}
     forceCleanupDrawingObjects()
-    
-    -- Cleanup aimbot FOV circles
-    pcall(function() autoAimFOV:Remove() end)
-    pcall(function() mouseAimFOV:Remove() end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         disableESP()
-        disableHitbox()
         disableTeleportPlayers()
         disableTeleportNPCs()
+        disableAimbot()
+        disableHitbox()
     end
 end)
 
--- Global ESP system access
 _G.ESP_SYSTEM = {
     enable = enableESP,
     disable = disableESP,
@@ -1824,26 +1873,6 @@ _G.ESP_SYSTEM = {
     }
 }
 
--- Global Aimbot system access
-_G.AIMBOT_SYSTEM = {
-    config = AimbotConfig,
-    getClosestTarget = getClosestTargetAim,
-    isEnemy = isEnemyForAim,
-    isEnemyNPC = isEnemyNPCForAim,
-    hasLineOfSight = hasLineOfSightAim,
-    isInFOV = isInFOVAim
-}
-
--- Global Hitbox system access
-_G.HITBOX_SYSTEM = {
-    config = HitboxConfig,
-    enable = enableHitbox,
-    disable = disableHitbox,
-    applyProperties = applyPropertiesToPart,
-    restoreProperties = restoreOriginalProperties
-}
-
--- Global Teleport system access
 _G.TELEPORT_SYSTEM = {
     config = TeleportConfig,
     enablePlayers = enableTeleportPlayers,
@@ -1852,7 +1881,20 @@ _G.TELEPORT_SYSTEM = {
     disableNPCs = disableTeleportNPCs
 }
 
--- Enhanced monitoring system
+_G.AIMBOT_SYSTEM = {
+    enable = enableAimbot,
+    disable = disableAimbot,
+    config = AimbotConfig,
+    unlockTarget = unlockTarget
+}
+
+_G.HITBOX_SYSTEM = {
+    enable = enableHitbox,
+    disable = disableHitbox,
+    refresh = refreshHitbox,
+    config = HitboxConfig
+}
+
 task.spawn(function()
     while true do
         task.wait(10)
@@ -1870,12 +1912,10 @@ task.spawn(function()
             
             local drawingCount = #DrawingObjects
             
-            -- More aggressive cleanup if too many objects
             if drawingCount > MAX_OBJECTS * 0.8 then
                 cleanupDrawingObjects()
             end
             
-            -- Remove invalid objects
             for i = #DrawingObjects, 1, -1 do
                 local obj = DrawingObjects[i]
                 if not obj or not pcall(function() return obj.Visible end) then
@@ -1886,10 +1926,9 @@ task.spawn(function()
     end
 end)
 
--- Notification when ESP is loaded
 Rayfield:Notify({
-   Title = "ESP + Aimbot caricato",
-   Content = "Il sistema ESP migliorato con doppia funzionalità aimbot, hitbox e teletraspo...",
+   Title = "ESP, Aimbot e Hitbox caricati",
+   Content = "I sistemi ESP, aimbot e hitbox potenziati con funzionalità di teletrasporto s...",
    Duration = 3,
    Image = "eye"
 })
