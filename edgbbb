@@ -30,12 +30,30 @@ local scripts = {
     ["Korean"] = "https://v0-supabase-secure-storage.vercel.app/api/script/2dd08683c10f322e16fdbdc7f8349365"
 }
 
--- Per-game storage keys
-local GAME_ID = tostring(game.GameId)
-local PER_GAME_SETTINGS_KEY = "LanguageSettings_PerGame"
-local LEGACY_UNIVERSAL_KEY = "UniversalLanguagePreference_AllGames"
-local LEGACY_SAVE_KEY = "LanguageSelector_" .. GAME_ID .. "_SavedSettings"
+local function generateScriptsHash()
+    local hashString = ""
+    local sortedKeys = {}
+    for key in pairs(scripts) do
+        table.insert(sortedKeys, key)
+    end
+    table.sort(sortedKeys)
+    
+    for _, key in ipairs(sortedKeys) do
+        local scriptId = scripts[key]:match("/script/([^/]+)$")
+        if scriptId then
+            hashString = hashString .. scriptId
+        end
+    end
+    
+    local hash = 0
+    for i = 1, #hashString do
+        hash = (hash * 31 + string.byte(hashString, i)) % 1000000000
+    end
+    return tostring(hash)
+end
 
+local SCRIPT_ID = generateScriptsHash()
+local SAVE_KEY = "LanguageSelector_" .. game.GameId .. "_" .. SCRIPT_ID .. "_SavedSettings"
 local autoSaveEnabled = true
 local savedLanguage = nil
 local currentScale = 1
@@ -43,190 +61,38 @@ local minScale = 0.5
 local maxScale = 2
 local resetNotificationShown = false
 
--- Safe file operations with error handling
-local function safeReadFile(filename)
-    local success, result = pcall(function()
-        if not isfile(filename) then
-            return nil
-        end
-        return readfile(filename)
-    end)
-    if success then
-        return result
-    end
-    return nil
-end
+local activeNotifications = {}
+local notificationYOffset = 20
 
-local function safeWriteFile(filename, content)
-    local success = pcall(function()
-        writefile(filename, content)
-    end)
-    return success
-end
-
-local function safeDeleteFile(filename)
-    local success = pcall(function()
-        if isfile(filename) then
-            delfile(filename)
-        end
-    end)
-    return success
-end
-
--- Per-game language storage structure
-local function loadPerGameSettings()
-    local filename = PER_GAME_SETTINGS_KEY .. ".json"
-    local content = safeReadFile(filename)
-    
-    if not content then
-        return {}
-    end
-    
-    local success, data = pcall(function()
-        return HttpService:JSONDecode(content)
-    end)
-    
-    if success and type(data) == "table" then
-        return data
-    end
-    
-    return {}
-end
-
-local function savePerGameSettings(allSettings)
-    if type(allSettings) ~= "table" then
-        allSettings = {}
-    end
-    
-    local filename = PER_GAME_SETTINGS_KEY .. ".json"
-    local success, encoded = pcall(function()
-        return HttpService:JSONEncode(allSettings)
-    end)
-    
-    if success and encoded then
-        return safeWriteFile(filename, encoded)
-    end
-    
-    return false
-end
-
-local function getLanguageForCurrentGame()
-    local allSettings = loadPerGameSettings()
-    
-    if type(allSettings) ~= "table" then
-        return nil
-    end
-    
-    local gameSettings = allSettings[GAME_ID]
-    if type(gameSettings) == "table" and type(gameSettings.language) == "string" then
-        -- Validate the language exists in available scripts
-        if scripts[gameSettings.language] then
-            return gameSettings.language
+local function getNextNotificationPosition()
+    local totalHeight = notificationYOffset
+    for _, notif in ipairs(activeNotifications) do
+        if notif and notif.Parent then
+            totalHeight = totalHeight + notif.AbsoluteSize.Y + 10
         end
     end
-    
-    return nil
+    return totalHeight
 end
 
-local function setLanguageForCurrentGame(language)
-    if type(language) ~= "string" or not scripts[language] then
-        return false
-    end
-    
-    local allSettings = loadPerGameSettings()
-    if type(allSettings) ~= "table" then
-        allSettings = {}
-    end
-    
-    -- Initialize game-specific settings if not exists
-    if type(allSettings[GAME_ID]) ~= "table" then
-        allSettings[GAME_ID] = {}
-    end
-    
-    -- Update settings for current game only
-    allSettings[GAME_ID].language = language
-    allSettings[GAME_ID].timestamp = os.time()
-    allSettings[GAME_ID].autoSave = autoSaveEnabled
-    allSettings[GAME_ID].scale = currentScale
-    
-    -- Add metadata for debugging (optional)
-    local success, productInfo = pcall(function()
-        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
-    end)
-    if success and productInfo then
-        allSettings[GAME_ID].placeName = productInfo.Name or "Unknown"
-    end
-    
-    local saveSuccess = savePerGameSettings(allSettings)
-    
-    if saveSuccess then
-        -- Set global variables for compatibility with existing scripts
-        _G.SelectedLanguage = language
-        _G.LanguagePreference = language
-    end
-    
-    return saveSuccess
-end
-
-local function deleteLanguageForCurrentGame()
-    local allSettings = loadPerGameSettings()
-    if type(allSettings) ~= "table" then
-        return true
-    end
-    
-    -- Remove only this game's settings
-    allSettings[GAME_ID] = nil
-    
-    -- Save updated settings (preserving other games)
-    return savePerGameSettings(allSettings)
-end
-
--- Migration from legacy storage
-local function migrateLegacySettings()
-    -- Check if we already have per-game settings
-    local currentLanguage = getLanguageForCurrentGame()
-    if currentLanguage then
-        return currentLanguage
-    end
-    
-    -- Try to migrate from legacy game-specific save
-    local legacyContent = safeReadFile(LEGACY_SAVE_KEY .. ".json")
-    if legacyContent then
-        local success, legacyData = pcall(function()
-            return HttpService:JSONDecode(legacyContent)
-        end)
-        if success and type(legacyData) == "table" and legacyData.language then
-            if scripts[legacyData.language] then
-                setLanguageForCurrentGame(legacyData.language)
-                if type(legacyData.autoSave) == "boolean" then
-                    autoSaveEnabled = legacyData.autoSave
-                end
-                if type(legacyData.scale) == "number" then
-                    currentScale = legacyData.scale
-                end
-                -- Clean up legacy file after migration
-                safeDeleteFile(LEGACY_SAVE_KEY .. ".json")
-                return legacyData.language
-            end
+local function updateNotificationPositions()
+    local currentY = notificationYOffset
+    for i, notif in ipairs(activeNotifications) do
+        if notif and notif.Parent then
+            local targetY = currentY
+            TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.new(1, -notif.AbsoluteSize.X - 20, 0, targetY)}):Play()
+            currentY = currentY + notif.AbsoluteSize.Y + 10
         end
     end
-    
-    -- Try to migrate from legacy universal settings (but only for this game)
-    local universalContent = safeReadFile(LEGACY_UNIVERSAL_KEY .. ".json")
-    if universalContent then
-        local success, universalData = pcall(function()
-            return HttpService:JSONDecode(universalContent)
-        end)
-        if success and type(universalData) == "table" and universalData.language then
-            if scripts[universalData.language] then
-                setLanguageForCurrentGame(universalData.language)
-                -- Don't delete universal file as other games might use it
-                return universalData.language
-            end
+end
+
+local function removeNotification(notif)
+    for i, n in ipairs(activeNotifications) do
+        if n == notif then
+            table.remove(activeNotifications, i)
+            break
         end
     end
-    
-    return nil
+    updateNotificationPositions()
 end
 
 local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
@@ -245,11 +111,13 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     local notificationFrame = Instance.new("Frame")
     notificationFrame.Name = "NotificationFrame"
     notificationFrame.Size = UDim2.new(0, notificationWidth, 0, notificationHeight)
-    notificationFrame.Position = UDim2.new(1, 20, 0, 140)
+    notificationFrame.Position = UDim2.new(1, 20, 0, getNextNotificationPosition())
     notificationFrame.BackgroundColor3 = Color3.fromRGB(35, 30, 25)
     notificationFrame.BackgroundTransparency = 0.05
     notificationFrame.BorderSizePixel = 0
     notificationFrame.Parent = notificationGui
+    
+    table.insert(activeNotifications, notificationFrame)
     
     local notificationCorner = Instance.new("UICorner")
     notificationCorner.CornerRadius = UDim.new(0, 12)
@@ -354,7 +222,7 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     
     local slideInTween = TweenService:Create(notificationFrame,
         TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        {Position = UDim2.new(1, -notificationWidth - 20, 0, 140)}
+        {Position = UDim2.new(1, -notificationWidth - 20, 0, notificationFrame.Position.Y.Offset)}
     )
     slideInTween:Play()
     
@@ -367,11 +235,12 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     local function closeNotification()
         local slideOutTween = TweenService:Create(notificationFrame,
             TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            {Position = UDim2.new(1, 20, 0, 140)}
+            {Position = UDim2.new(1, 20, 0, notificationFrame.Position.Y.Offset)}
         )
         slideOutTween:Play()
         
         slideOutTween.Completed:Connect(function()
+            removeNotification(notificationFrame)
             notificationGui:Destroy()
         end)
     end
@@ -385,6 +254,46 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
             closeNotification()
         end
     end)
+end
+
+local function saveLanguage(language)
+    local data = {
+        language = language,
+        timestamp = os.time(),
+        gameId = game.GameId,
+        scriptId = SCRIPT_ID
+    }
+    writefile(SAVE_KEY .. ".json", HttpService:JSONEncode(data))
+    
+    _G["SelectedLanguage_" .. SCRIPT_ID] = language
+    _G["LanguagePreference_" .. SCRIPT_ID] = language
+end
+
+local function loadLanguage()
+    if isfile(SAVE_KEY .. ".json") then
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(SAVE_KEY .. ".json"))
+        end)
+        if success and data and data.language then
+            if scripts[data.language] then
+                _G["SelectedLanguage_" .. SCRIPT_ID] = data.language
+                _G["LanguagePreference_" .. SCRIPT_ID] = data.language
+                return data.language
+            else
+                local fallbackLang = "English"
+                _G["SelectedLanguage_" .. SCRIPT_ID] = fallbackLang
+                _G["LanguagePreference_" .. SCRIPT_ID] = fallbackLang
+                
+                spawn(function()
+                    wait(0.5)
+                    showLanguageUnavailableNotification(data.language, fallbackLang)
+                end)
+                
+                return fallbackLang
+            end
+        end
+    end
+    return nil
 end
 
 local function showResetNotification()
@@ -408,11 +317,13 @@ local function showResetNotification()
     local notificationFrame = Instance.new("Frame")
     notificationFrame.Name = "NotificationFrame"
     notificationFrame.Size = UDim2.new(0, notificationWidth, 0, notificationHeight)
-    notificationFrame.Position = UDim2.new(1, 20, 0, 20)
+    notificationFrame.Position = UDim2.new(1, 20, 0, getNextNotificationPosition())
     notificationFrame.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
     notificationFrame.BackgroundTransparency = 0.05
     notificationFrame.BorderSizePixel = 0
     notificationFrame.Parent = notificationGui
+    
+    table.insert(activeNotifications, notificationFrame)
     
     local notificationCorner = Instance.new("UICorner")
     notificationCorner.CornerRadius = UDim.new(0, 12)
@@ -453,7 +364,7 @@ local function showResetNotification()
     questionText.Size = UDim2.new(1, -20, 0, 35)
     questionText.Position = UDim2.new(0, 10, 0, 8)
     questionText.BackgroundTransparency = 1
-    questionText.Text = "🔄 Reset language for this game?"
+    questionText.Text = "🔄 Reset language preference?"
     questionText.TextColor3 = Color3.fromRGB(255, 255, 255)
     questionText.TextSize = 13
     questionText.Font = Enum.Font.SourceSansBold
@@ -471,7 +382,7 @@ local function showResetNotification()
     infoText.Size = UDim2.new(1, -20, 0, 20)
     infoText.Position = UDim2.new(0, 10, 0, 40)
     infoText.BackgroundTransparency = 1
-    infoText.Text = "Only affects this specific game"
+    infoText.Text = "This will reset for this instance"
     infoText.TextColor3 = Color3.fromRGB(180, 200, 255)
     infoText.TextSize = 9
     infoText.Font = Enum.Font.SourceSansItalic
@@ -545,7 +456,7 @@ local function showResetNotification()
     
     local slideInTween = TweenService:Create(notificationFrame,
         TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        {Position = UDim2.new(1, -notificationWidth - 20, 0, 20)}
+        {Position = UDim2.new(1, -notificationWidth - 20, 0, notificationFrame.Position.Y.Offset)}
     )
     slideInTween:Play()
     
@@ -558,11 +469,12 @@ local function showResetNotification()
     local function closeNotification()
         local slideOutTween = TweenService:Create(notificationFrame,
             TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            {Position = UDim2.new(1, 20, 0, 20)}
+            {Position = UDim2.new(1, 20, 0, notificationFrame.Position.Y.Offset)}
         )
         slideOutTween:Play()
         
         slideOutTween.Completed:Connect(function()
+            removeNotification(notificationFrame)
             notificationGui:Destroy()
         end)
     end
@@ -601,9 +513,11 @@ local function showResetNotification()
     
     yesButton.MouseButton1Click:Connect(function()
         savedLanguage = nil
-        _G.SelectedLanguage = nil
-        _G.LanguagePreference = nil
-        deleteLanguageForCurrentGame()
+        _G["SelectedLanguage_" .. SCRIPT_ID] = nil
+        _G["LanguagePreference_" .. SCRIPT_ID] = nil
+        if isfile(SAVE_KEY .. ".json") then
+            delfile(SAVE_KEY .. ".json")
+        end
         closeNotification()
     end)
     
@@ -616,43 +530,58 @@ local function showResetNotification()
     end)
 end
 
+local function saveSettings()
+    if autoSaveEnabled and savedLanguage then
+        local data = {
+            language = savedLanguage,
+            autoSave = autoSaveEnabled,
+            scale = currentScale
+        }
+        writefile(SAVE_KEY .. ".json", HttpService:JSONEncode(data))
+    end
+end
+
+local function loadSettings()
+    if isfile(SAVE_KEY .. ".json") then
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(SAVE_KEY .. ".json"))
+        end)
+        if success and data then
+            savedLanguage = data.language
+            autoSaveEnabled = data.autoSave or true
+            currentScale = data.scale or 1
+            return data
+        end
+    end
+    return nil
+end
+
 local function autoLoadScript()
-    -- Try to load language for current game
-    local migratedLanguage = migrateLegacySettings()
-    savedLanguage = getLanguageForCurrentGame()
-    
-    if not savedLanguage then
+    local lang = loadLanguage()
+    if autoSaveEnabled and lang and scripts[lang] then
+        savedLanguage = lang
+        _G["SelectedLanguage_" .. SCRIPT_ID] = lang
+        _G["LanguagePreference_" .. SCRIPT_ID] = lang
+    else
         return false
     end
     
-    -- Validate language is available
-    if not scripts[savedLanguage] then
-        local fallbackLang = "English"
+    if savedLanguage and scripts[savedLanguage] then
+        showResetNotification()
+        
         spawn(function()
-            wait(0.5)
-            showLanguageUnavailableNotification(savedLanguage, fallbackLang)
+            wait(0.1)
+            local success, result = pcall(function()
+                loadstring(game:HttpGet(scripts[savedLanguage]))()
+            end)
         end)
-        savedLanguage = fallbackLang
-        setLanguageForCurrentGame(fallbackLang)
+        return true
     end
-    
-    -- Set global variables for compatibility
-    _G.SelectedLanguage = savedLanguage
-    _G.LanguagePreference = savedLanguage
-    
-    showResetNotification()
-    
-    spawn(function()
-        wait(0.1)
-        local success, result = pcall(function()
-            loadstring(game:HttpGet(scripts[savedLanguage]))()
-        end)
-    end)
-    
-    return true
+    return false
 end
 
--- Attempt auto-load
+loadSettings()
+
 if autoLoadScript() then
     return
 end
@@ -784,7 +713,7 @@ subtitle.Name = "Subtitle"
 subtitle.Size = UDim2.new(1, -30, 0, 18)
 subtitle.Position = UDim2.new(0, 15, 0, 42)
 subtitle.BackgroundTransparency = 1
-subtitle.Text = "Per-game setting • Drag to move"
+subtitle.Text = "Saved per instance • Drag to move"
 subtitle.TextColor3 = Color3.fromRGB(180, 200, 255)
 subtitle.TextSize = 9
 subtitle.Font = Enum.Font.SourceSansItalic
@@ -905,10 +834,12 @@ autoSaveToggle.MouseButton1Click:Connect(function()
     )
     indicatorTween:Play()
     
-    if autoSaveEnabled and savedLanguage then
-        setLanguageForCurrentGame(savedLanguage)
-    elseif not autoSaveEnabled then
-        deleteLanguageForCurrentGame()
+    if autoSaveEnabled then
+        saveSettings()
+    else
+        if isfile(SAVE_KEY .. ".json") then
+            delfile(SAVE_KEY .. ".json")
+        end
     end
 end)
 
@@ -1067,7 +998,8 @@ local function createLanguageButton(languageName, scriptUrl)
     
     button.MouseButton1Click:Connect(function()
         savedLanguage = languageName
-        setLanguageForCurrentGame(languageName)
+        saveSettings()
+        saveLanguage(languageName)
         
         local loadingFrame = Instance.new("Frame")
         loadingFrame.Name = "LoadingFrame"
@@ -1111,7 +1043,7 @@ local function createLanguageButton(languageName, scriptUrl)
         infoText.Size = UDim2.new(1, -30, 0, 25)
         infoText.Position = UDim2.new(0, 15, 0.55, 0)
         infoText.BackgroundTransparency = 1
-        infoText.Text = "✨ This preference is saved only for this game"
+        infoText.Text = "✨ This language will be saved for this instance"
         infoText.TextColor3 = Color3.fromRGB(180, 200, 255)
         infoText.TextSize = 10
         infoText.Font = Enum.Font.SourceSansItalic
