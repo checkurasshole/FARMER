@@ -1,0 +1,31 @@
+-- Main Script - Language Selector
+local LanguageSelector = loadstring(game:HttpGet("https://raw.githubusercontent.com/uyh505-eng/published-content-jycoui/refs/heads/main/yeshhhh"))()
+
+-- Script links for each language
+local scripts = {
+    ["English"] = "https://v0-supabase-secure-storage.vercel.app/api/script/a1e41450fe9e2634bf2fab58f2670e08",
+    ["Spanish"] = "https://v0-supabase-secure-storage.vercel.app/api/script/fbc8bdea28c5d168f301e2b4a718d0cb",
+    ["Vietnamese"] = "https://v0-supabase-secure-storage.vercel.app/api/script/8a40400a77adeefda20c51641d3427d6",
+    ["Filipino"] = "https://v0-supabase-secure-storage.vercel.app/api/script/b71148d7a30f0ba9409e682dd8977db1",
+    ["Thai"] = "https://v0-supabase-secure-storage.vercel.app/api/script/af8b107ba78995d9628a36bca4658124",
+    ["Russian"] = "https://v0-supabase-secure-storage.vercel.app/api/script/51ba42ca88626f94e33ac0dc24e34694",
+    ["Portuguese (Brazil)"] = "https://v0-supabase-secure-storage.vercel.app/api/script/fa780a68f566268224209d468242e3cf",
+    ["German"] = "https://v0-supabase-secure-storage.vercel.app/api/script/1adf1c1740d02ad3db28b6d21998cb87",
+    ["Korean"] = "https://v0-supabase-secure-storage.vercel.app/api/script/c9ed78d9ab7e3067ce039a4441fc205b",
+    ["Italian"] = "https://v0-supabase-secure-storage.vercel.app/api/script/b595d4a02b619cc1944ec3ccf0875eba",
+    ["Chinese"] = "https://v0-supabase-secure-storage.vercel.app/api/script/414d25bbda0b01609a4fdecf2db2c309",
+    ["French"] = "https://v0-supabase-secure-storage.vercel.app/api/script/e547279e58afa53ab129969a31e673d7",
+    ["Japanese"] = "https://v0-supabase-secure-storage.vercel.app/api/script/99d2dda399cf220d572657975b105bae",
+    ["Arabic"] = "https://v0-supabase-secure-storage.vercel.app/api/script/9e0880c57ac21c0094a0164c6719e837",
+    ["Hindi"] = "https://v0-supabase-secure-storage.vercel.app/api/script/79f08ca9fb7bf910b4db84fbeb1e6801",
+}
+
+
+-- Initialize the language selector
+local selector = LanguageSelector.new()
+local autoLoaded = selector:Init(scripts)
+
+-- If no language was auto-loaded, show the GUI
+if not autoLoaded then
+    selector:CreateGUI()
+end
